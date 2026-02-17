@@ -26,48 +26,65 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
+    /* Dikey ortalama */
     min-height: 100vh;
-    padding: 20px;
-    overflow: hidden;
-    /* Taşmayı engelle */
+    padding: 10px;
+    /* Mobilde kenar boşluğu azaltıldı */
+    overflow-y: auto;
+    /* Dikey kaydırmaya izin ver */
+    overflow-x: hidden;
 }
 
 .container {
-    background-color: var(--card-bg);
-    padding: 2rem;
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 20px;
+    /* Padding azaltıldı */
     border-radius: 30px;
-    box-shadow: var(--shadow-soft);
-    width: 100%;
-    max-width: 500px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
     text-align: center;
-    transition: transform 0.3s ease;
-    border: 1px solid rgba(255, 255, 255, 0.5);
+    max-width: 400px;
+    width: 100%;
     backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    margin: 20px 0;
+    /* Üst-alt boşluk */
 }
 
-header h1 {
-    color: var(--accent-color);
-    margin-bottom: 0.5rem;
-    font-size: 2.5rem;
+h1 {
+    color: var(--primary-color);
+    margin-bottom: 0.2rem;
+    font-size: 2rem;
+    /* Başlık küçültüldü */
     font-weight: 900;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+    text-shadow: 2px 2px 0px rgba(0, 0, 0, 0.1);
 }
 
-header p {
-    font-size: 1rem;
+.subtitle {
     color: #78909C;
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
+    /* Boşluk azaltıldı */
+    font-size: 0.9rem;
+    /* Alt başlık küçültüldü */
+    font-weight: 600;
 }
 
 /* Timer Display with Glow */
 .timer-container {
     position: relative;
     width: 220px;
+    /* Sayaç boyutu küçültüldü */
     height: 220px;
-    margin: 0 auto 2rem;
+    margin: 0 auto 1.5rem;
+    /* Alt boşluk azaltıldı */
     display: flex;
     justify-content: center;
     align-items: center;
+    border-radius: 50%;
+    background-color: white;
+    box-shadow:
+        inset 0 0 20px rgba(0, 0, 0, 0.05),
+        0 10px 20px rgba(0, 0, 0, 0.1);
+    border: 8px solid #FFECB3;
 }
 
 .timer-glow {
@@ -83,16 +100,10 @@ header p {
 .timer-display {
     position: relative;
     z-index: 1;
-    background: var(--card-bg);
-    width: 190px;
-    height: 190px;
-    border-radius: 50%;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    border: 6px solid var(--primary-color);
-    box-shadow: inset 0 0 20px rgba(255, 193, 7, 0.2);
 }
 
 #timer {
