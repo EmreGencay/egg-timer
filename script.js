@@ -71,42 +71,26 @@ function pauseTimer() {
     clearInterval(intervalId);
     isRunning = false;
     pauseBtn.style.display = 'none'; // Duraklat gizle (Tekrar başlatma için karta tıklanmalı veya sadece durdurulmuş kalır)
-    // Sade tasarımda "Devam Et" butonu koymadık, kullanıcı karta tekrar basarsa baştan başlar veya resetler.
-    // Ancak mantıklı olan: Duraklatınca "Başlat" butonu çıkması gerekirdi ama kaldırdık.
-    // Bu durumda "Duraklat" yerine "İptal/Sıfırla" gibi çalışabilir ya da 
-    // Kullanıcı duraklatırsa geri sayım durur. Devam etmesi için belki karta tekrar tıklatabiliriz? 
-    // Ama karta tıklayınca süre sıfırlanıyor.
-    // Kullanıcı isteğinde "Başlat butonu kaldırıldı" dendi. 
-    // Duraklat özelliği istenmedi ama kodda bıraktım. Eğer duraklatırsa devam ettirecek bir buton yok şu an.
-    // O yüzden pauseBtn metnini "Devam Et" yapıp click eventi değiştirebiliriz.
+    releaseWakeLock(); // Ekran kilidini bırak
 
     pauseBtn.style.display = 'flex';
     pauseBtn.innerHTML = "▶️ Devam Et";
     pauseBtn.classList.remove('secondary');
     pauseBtn.classList.add('primary');
 
-    // Event listener'ı değiştirmek yerine durumu kontrol edelim.
-    // Aşağıda pauseBtn click handler'ını güncelleyeceğim.
+    triggerHaptic(50);
 
-    triggerHaptic(50); // Kısa titreşim
-
-    document.querySelector('.timer-glow').style.animationDuration = "2s"; // Yavaşlat
+    document.querySelector('.timer-glow').style.animationDuration = "2s";
 }
 
 // Pause/Resume Toggle
 pauseBtn.addEventListener('click', () => {
     triggerHaptic(50);
     if (isRunning) {
-        // Durdur
-        clearInterval(intervalId);
-        isRunning = false;
-        pauseBtn.innerHTML = "▶️ Devam Et";
-        pauseBtn.classList.remove('secondary');
-        pauseBtn.classList.add('primary');
+        pauseTimer(); // Wake lock serbest bırakılır
         document.querySelector('.timer-glow').style.animationDuration = "0s";
     } else {
-        // Devam Et
-        startTimer();
+        startTimer(); // Wake lock istenir
         pauseBtn.innerHTML = "⏸️ Duraklat";
         pauseBtn.classList.remove('primary');
         pauseBtn.classList.add('secondary');
@@ -122,13 +106,13 @@ function resetTimer() {
         return;
     }
 
-    // Çalışıyorsa sor, değilse direkt sıfırla
     const isConfirm = isRunning ? confirm("İşlemi iptal etmek istiyor musunuz?") : true;
 
     if (isConfirm) {
         clearInterval(intervalId);
         isRunning = false;
-        timeLeft = 0; // Sıfırla
+        releaseWakeLock(); // Ekran kilidini bırak
+        timeLeft = 0;
         updateDisplay();
 
         pauseBtn.style.display = 'none';
@@ -139,7 +123,6 @@ function resetTimer() {
         document.body.style.backgroundColor = "";
         document.title = "Yumurta Zamanlayıcı";
 
-        // Kart seçimlerini kaldır
         presetBtns.forEach(b => b.classList.remove('active'));
     }
 }
@@ -154,12 +137,13 @@ function stopAlarm() {
 
     timeLeft = 0;
     updateDisplay();
+    releaseWakeLock(); // Emin olmak için
 
     pauseBtn.style.display = 'none';
     resetBtn.innerHTML = "🔄 Sıfırla";
-    resetBtn.classList.remove('primary'); // Varsayılan renge dön
+    resetBtn.classList.remove('primary');
     resetBtn.classList.add('danger');
-    resetBtn.classList.remove('pulse-active'); // Pulse kaldır
+    resetBtn.classList.remove('pulse-active');
 
     presetBtns.forEach(b => b.classList.remove('active'));
     triggerHaptic(50);
@@ -168,19 +152,36 @@ function stopAlarm() {
 // Süre bittiğinde
 function timerFinished() {
     isRunning = false;
+    // releaseWakeLock(); // Ekran kilidini bırak (artık gerek yok veya kalsa mı? Alarm çalarken ekran açık kalsın)
+    // Aslında alarm çalarken ekranın açık kalması daha iyi olur, kullanıcı durdurabilsin diye.
+    // O yüzden releaseWakeLock() burada çağırmayalım, stopAlarm'da çağıralım.
+    // Ancak pil tassarrufu için timeout koyabiliriz ama şimdilik kalsın.
+    // Düzeltme: Kullanıcı "Alarmı Durdur" diyene kadar ekran açık kalsın.
+
     pauseBtn.style.display = 'none';
 
     resetBtn.style.display = 'flex';
     resetBtn.innerHTML = "🔕 Alarmı Durdur";
     resetBtn.classList.remove('danger');
     resetBtn.classList.add('primary');
-    resetBtn.classList.add('pulse-active'); // Pulse ekle
+    resetBtn.classList.add('pulse-active');
 
-    alarmSound.loop = true;
-    alarmSound.play().catch(e => console.log("Otomatik oynatma hatası:", e));
+    // Ses çalma (Daha güvenilir yöntem)
+    const playPromise = alarmSound.play();
+    if (playPromise !== undefined) {
+        playPromise.then(_ => {
+            // Otomatik oynatma başladı
+            alarmSound.loop = true;
+        })
+            .catch(error => {
+                // Otomatik oynatma engellendi
+                console.log("Otomatik oynatma engellendi, bildirim gönderiliyor.");
+                sendNotification("Süre Bitti!", "Alarm çalınamadı, lütfen kontrol edin.");
+            });
+    }
+
     sendNotification("Yumurtanız Hazır!", "Afiyet olsun! 🥚");
 
-    // Uzun titreşim (zzzz - zzzz - zzzz)
     triggerHaptic([500, 200, 500, 200, 500]);
 
     document.body.style.backgroundColor = "#FFF9C4";
@@ -189,30 +190,26 @@ function timerFinished() {
     document.title = "🔔 Hazır! - Yumurta Zamanlayıcı";
 }
 
-// Hazır süre butonları (Karta tıklayınca direkt başlar)
+// Hazır süre butonları
 presetBtns.forEach(btn => {
     btn.addEventListener('click', () => {
-        // Önce durdur ve sıfırla
         clearInterval(intervalId);
         isRunning = false;
-        stopAlarm(); // Alarm çalıyorsa sustur
+        stopAlarm();
 
-        // Seçim titreşimi
         triggerHaptic(70);
+        unlockAudio(); // Kullanıcı etkileşimi anında ses kilidini aç
 
         const min = parseInt(btn.dataset.time);
         timeLeft = min * 60;
         initialTime = timeLeft;
         updateDisplay();
 
-        // Aktif yap
         presetBtns.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
 
-        // OTO BAŞLAT
         startTimer();
 
-        // Buton görünümü düzelt (Eğer duraklat modunda kaldıysa)
         pauseBtn.innerHTML = "⏸️ Duraklat";
         pauseBtn.classList.remove('primary');
         pauseBtn.classList.add('secondary');
