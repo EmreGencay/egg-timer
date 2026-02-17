@@ -2,13 +2,13 @@ const timerDisplay = document.getElementById('timer');
 const pauseBtn = document.getElementById('pause-btn');
 const resetBtn = document.getElementById('reset-btn');
 const alarmSound = document.getElementById('alarm-sound');
-// Sınıf ismi değişti: .preset-card
 const presetBtns = document.querySelectorAll('.preset-card');
 
 let timeLeft = 0;
 let initialTime = 0;
 let intervalId = null;
 let isRunning = false;
+let wakeLock = null;
 
 // Notification İzni İste
 if ("Notification" in window) {
@@ -22,38 +22,59 @@ function formatTime(seconds) {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-// Ekranı güncelle
 function updateDisplay() {
     timerDisplay.textContent = formatTime(timeLeft);
     document.title = `${formatTime(timeLeft)} - Yumurta Zamanlayıcı`;
 }
 
-// Push Bildirimi Gönder
-function sendNotification(title, body) {
-    if (Notification.permission === "granted") {
-        new Notification(title, {
-            body: body,
-            icon: 'assets/5min.png'
-        });
-    }
-}
-
-// Haptic Feedback (Titreşim)
+// Haptic Feedback
 function triggerHaptic(pattern) {
     if (navigator.vibrate) {
         navigator.vibrate(pattern);
     }
 }
 
-// Sayacı başlat
+// Wake Lock (Ekran Açık Tutma)
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+        }
+    } catch (err) {
+        console.error(`${err.name}, ${err.message}`);
+    }
+}
+
+async function releaseWakeLock() {
+    if (wakeLock !== null) {
+        await wakeLock.release();
+        wakeLock = null;
+    }
+}
+
+// Ses Kilidini Aç
+function unlockAudio() {
+    alarmSound.play().then(() => {
+        alarmSound.pause();
+        alarmSound.currentTime = 0;
+    }).catch(e => console.log("Audio unlock failed", e));
+}
+
+// Sayacı Başlat
 function startTimer() {
     if (timeLeft <= 0) return;
     if (isRunning) return;
 
     isRunning = true;
-    pauseBtn.style.display = 'flex'; // Duraklat butonu görünür
+    requestWakeLock();
 
-    document.querySelector('.timer-glow').style.animationDuration = "1s"; // Hızlandır
+    // UI Güncelleme
+    pauseBtn.style.display = 'flex';
+    pauseBtn.innerHTML = "⏸️ Duraklat";
+    pauseBtn.classList.remove('primary');
+    pauseBtn.classList.add('secondary');
+
+    document.querySelector('.timer-glow').style.animationDuration = "1s";
 
     intervalId = setInterval(() => {
         timeLeft--;
@@ -66,157 +87,144 @@ function startTimer() {
     }, 1000);
 }
 
-// Duraklat (Bu fonksiyon doğrudan kullanılmıyor, pauseBtn event listener'ı tarafından yönetiliyor)
+// Sayacı Duraklat
 function pauseTimer() {
     clearInterval(intervalId);
     isRunning = false;
-    pauseBtn.style.display = 'none'; // Duraklat gizle (Tekrar başlatma için karta tıklanmalı veya sadece durdurulmuş kalır)
-    releaseWakeLock(); // Ekran kilidini bırak
+    releaseWakeLock();
 
-    pauseBtn.style.display = 'flex';
+    // UI Güncelleme
     pauseBtn.innerHTML = "▶️ Devam Et";
     pauseBtn.classList.remove('secondary');
     pauseBtn.classList.add('primary');
 
-    triggerHaptic(50);
-
-    document.querySelector('.timer-glow').style.animationDuration = "2s";
+    document.querySelector('.timer-glow').style.animationDuration = "0s";
 }
 
-// Pause/Resume Toggle
+// Duraklat/Devam Et Butonu
 pauseBtn.addEventListener('click', () => {
     triggerHaptic(50);
     if (isRunning) {
-        pauseTimer(); // Wake lock serbest bırakılır
-        document.querySelector('.timer-glow').style.animationDuration = "0s";
+        pauseTimer();
     } else {
-        startTimer(); // Wake lock istenir
-        pauseBtn.innerHTML = "⏸️ Duraklat";
-        pauseBtn.classList.remove('primary');
-        pauseBtn.classList.add('secondary');
+        startTimer();
     }
 });
 
-
 // Sıfırla
-function resetTimer() {
+resetBtn.addEventListener('click', () => {
     triggerHaptic(50);
-    if (alarmSound.loop) {
+
+    // Eğer alarm çalıyorsa, sadece alarmı durdur ve sıfırla
+    if (alarmSound.loop || !alarmSound.paused) {
         stopAlarm();
         return;
     }
 
-    const isConfirm = isRunning ? confirm("İşlemi iptal etmek istiyor musunuz?") : true;
-
-    if (isConfirm) {
-        clearInterval(intervalId);
-        isRunning = false;
-        releaseWakeLock(); // Ekran kilidini bırak
-        timeLeft = 0;
-        updateDisplay();
-
-        pauseBtn.style.display = 'none';
-        pauseBtn.innerHTML = "⏸️ Duraklat";
-        pauseBtn.classList.remove('primary');
-        pauseBtn.classList.add('secondary');
-
-        document.body.style.backgroundColor = "";
-        document.title = "Yumurta Zamanlayıcı";
-
-        presetBtns.forEach(b => b.classList.remove('active'));
+    // Sayaç çalışıyorsa onay iste
+    if (isRunning) {
+        if (!confirm("Sayacı sıfırlamak istiyor musunuz?")) return;
     }
-}
 
-function stopAlarm() {
-    alarmSound.pause();
-    alarmSound.currentTime = 0;
-    alarmSound.loop = false;
-    document.body.style.backgroundColor = "";
-    timerDisplay.style.color = "";
-    document.title = "Yumurta Zamanlayıcı";
-
+    // Her şeyi sıfırla
+    clearInterval(intervalId);
+    isRunning = false;
+    releaseWakeLock();
     timeLeft = 0;
     updateDisplay();
-    releaseWakeLock(); // Emin olmak için
 
     pauseBtn.style.display = 'none';
-    resetBtn.innerHTML = "🔄 Sıfırla";
-    resetBtn.classList.remove('primary');
-    resetBtn.classList.add('danger');
-    resetBtn.classList.remove('pulse-active');
-
+    document.querySelector('.timer-glow').style.animationDuration = "0s";
     presetBtns.forEach(b => b.classList.remove('active'));
-    triggerHaptic(50);
-}
 
-// Süre bittiğinde
+    document.title = "Yumurta Zamanlayıcı";
+    document.body.style.backgroundColor = "";
+});
+
+// Süre Bittiğinde
 function timerFinished() {
     isRunning = false;
-    // releaseWakeLock(); // Ekran kilidini bırak (artık gerek yok veya kalsa mı? Alarm çalarken ekran açık kalsın)
-    // Aslında alarm çalarken ekranın açık kalması daha iyi olur, kullanıcı durdurabilsin diye.
-    // O yüzden releaseWakeLock() burada çağırmayalım, stopAlarm'da çağıralım.
-    // Ancak pil tassarrufu için timeout koyabiliriz ama şimdilik kalsın.
-    // Düzeltme: Kullanıcı "Alarmı Durdur" diyene kadar ekran açık kalsın.
+    // releaseWakeLock(); // Alarm çalarken ekran açık kalsın
 
     pauseBtn.style.display = 'none';
 
+    // Butonu "Alarmı Durdur" yap
     resetBtn.style.display = 'flex';
     resetBtn.innerHTML = "🔕 Alarmı Durdur";
     resetBtn.classList.remove('danger');
     resetBtn.classList.add('primary');
     resetBtn.classList.add('pulse-active');
 
-    // Ses çalma (Daha güvenilir yöntem)
-    const playPromise = alarmSound.play();
-    if (playPromise !== undefined) {
-        playPromise.then(_ => {
-            // Otomatik oynatma başladı
-            alarmSound.loop = true;
-        })
-            .catch(error => {
-                // Otomatik oynatma engellendi
-                console.log("Otomatik oynatma engellendi, bildirim gönderiliyor.");
-                sendNotification("Süre Bitti!", "Alarm çalınamadı, lütfen kontrol edin.");
-            });
-    }
-
-    sendNotification("Yumurtanız Hazır!", "Afiyet olsun! 🥚");
+    // Alarmı Çal
+    alarmSound.loop = true;
+    alarmSound.play().catch(e => console.log("Alarm play error", e));
 
     triggerHaptic([500, 200, 500, 200, 500]);
 
+    // Görsel Uyarı
     document.body.style.backgroundColor = "#FFF9C4";
     timerDisplay.textContent = "Hazır!";
     timerDisplay.style.color = "#F44336";
     document.title = "🔔 Hazır! - Yumurta Zamanlayıcı";
+
+    if (Notification.permission === "granted") {
+        new Notification("Yumurtanız Hazır!", {
+            body: "Afiyet olsun! 🥚",
+            icon: 'assets/5min.png'
+        });
+    }
 }
 
-// Hazır süre butonları
+// Alarmı Durdur ve Normale Dön
+function stopAlarm() {
+    alarmSound.pause();
+    alarmSound.currentTime = 0;
+    alarmSound.loop = false;
+
+    releaseWakeLock();
+
+    timeLeft = 0;
+    updateDisplay();
+
+    // UI Normale Dön
+    document.body.style.backgroundColor = "";
+    timerDisplay.style.color = "";
+    document.title = "Yumurta Zamanlayıcı";
+
+    resetBtn.innerHTML = "🔄 Sıfırla";
+    resetBtn.classList.remove('primary');
+    resetBtn.classList.add('danger');
+    resetBtn.classList.remove('pulse-active');
+
+    presetBtns.forEach(b => b.classList.remove('active'));
+}
+
+// Yumurta Seçimi (Preset Buttons)
 presetBtns.forEach(btn => {
     btn.addEventListener('click', () => {
+        // Önceki işlemi temizle
         clearInterval(intervalId);
         isRunning = false;
-        stopAlarm();
+        stopAlarm(); // Eğer alarm çalıyorsa durdur
 
         triggerHaptic(70);
-        unlockAudio(); // Kullanıcı etkileşimi anında ses kilidini aç
+        unlockAudio(); // Ses kilidini aç
 
+        // Süreyi Ayarla
         const min = parseInt(btn.dataset.time);
         timeLeft = min * 60;
         initialTime = timeLeft;
         updateDisplay();
 
+        // Aktif Butonu İşaretle
         presetBtns.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
 
+        // Otomatik Başlat
         startTimer();
-
-        pauseBtn.innerHTML = "⏸️ Duraklat";
-        pauseBtn.classList.remove('primary');
-        pauseBtn.classList.add('secondary');
     });
 });
 
-resetBtn.addEventListener('click', resetTimer);
-
+// Başlangıç Ayarları
 pauseBtn.style.display = 'none';
 updateDisplay();
