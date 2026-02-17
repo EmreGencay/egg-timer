@@ -1,0 +1,21 @@
+{
+    "name": "Yumurta Zamanlayıcı",
+    "short_name": "Egg Timer",
+    "description": "Yumurtanızı tam kıvamında pişirin!",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#FFF8E1",
+    "theme_color": "#FFC107",
+    "icons": [
+        {
+            "src": "assets/5min.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "assets/5min.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}

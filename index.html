@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yumurta Zamanlayıcı</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#FFC107">
+    <link rel="apple-touch-icon" href="assets/5min.png">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Yumurta Zamanlayıcı</h1>
+            <p>Yumurtanızı tam istediğiniz kıvamda pişirin.</p>
+        </header>
+
+        <main>
+            <!-- Zamanlayıcı ve Kontroller Buraya Gelecek -->
+            <div id="app">
+                <div class="timer-container">
+                    <div class="timer-glow"></div>
+                    <div class="timer-display">
+                        <span id="timer">00:00</span>
+                    </div>
+                </div>
+
+                <div class="presets-grid">
+                    <button class="preset-card" data-time="5" title="Kayısı (5 dk)">
+                        <div class="egg-visual">
+                            <img src="assets/5min.png" alt="Kayısı"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='inline'">
+                            <span class="egg-fallback-emoji" style="display:none">🥚</span>
+                        </div>
+                        <div class="preset-info">
+                            <span class="preset-name">Kayısı</span>
+                            <span class="preset-time">5 dk</span>
+                        </div>
+                    </button>
+                    <button class="preset-card" data-time="6" title="Orta (6 dk)">
+                        <div class="egg-visual">
+                            <img src="assets/6min.png" alt="Orta"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='inline'">
+                            <span class="egg-fallback-emoji" style="display:none">🥚</span>
+                        </div>
+                        <div class="preset-info">
+                            <span class="preset-name">Orta</span>
+                            <span class="preset-time">6 dk</span>
+                        </div>
+                    </button>
+                    <button class="preset-card" data-time="8" title="Katı (8 dk)">
+                        <div class="egg-visual">
+                            <img src="assets/8min.png" alt="Katı"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='inline'">
+                            <span class="egg-fallback-emoji" style="display:none">🥚</span>
+                        </div>
+                        <div class="preset-info">
+                            <span class="preset-name">Katı</span>
+                            <span class="preset-time">8 dk</span>
+                        </div>
+                    </button>
+                    <button class="preset-card" data-time="10" title="Tam Pişmiş (10 dk)">
+                        <div class="egg-visual">
+                            <img src="assets/10min.png" alt="Tam Pişmiş"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='inline'">
+                            <span class="egg-fallback-emoji" style="display:none">🥚</span>
+                        </div>
+                        <div class="preset-info">
+                            <span class="preset-name">Tam Pişmiş</span>
+                            <span class="preset-time">10 dk</span>
+                        </div>
+                    </button>
+                </div>
+
+                <div class="controls">
+                    <!-- Başlat butonu kaldırıldı -->
+                    <button id="pause-btn" class="control-btn secondary" style="display: none;">⏸️ Duraklat</button>
+                    <button id="reset-btn" class="control-btn danger">🔄 Sıfırla</button>
+                </div>
+
+                <audio id="alarm-sound"
+                    src="https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3"
+                    preload="auto"></audio>
+            </div>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+
+</html>
