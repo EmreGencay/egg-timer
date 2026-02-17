@@ -11,9 +11,8 @@ let isRunning = false;
 let wakeLock = null;
 
 // Notification İzni İste
-if ("Notification" in window) {
-    Notification.requestPermission();
-}
+// Notification İzni (Gerekirse)
+// Butona tıklanınca istenecek
 
 // Zamanı formatla (MM:SS)
 function formatTime(seconds) {
@@ -52,12 +51,18 @@ async function releaseWakeLock() {
     }
 }
 
-// Ses Kilidini Aç
-function unlockAudio() {
+// Ses ve Bildirim Kilidini Aç
+function unlockAudioAndNotify() {
+    // Ses
     alarmSound.play().then(() => {
         alarmSound.pause();
         alarmSound.currentTime = 0;
     }).catch(e => console.log("Audio unlock failed", e));
+
+    // Bildirim İzni
+    if ("Notification" in window && Notification.permission !== "granted") {
+        Notification.requestPermission();
+    }
 }
 
 // Sayacı Başlat
@@ -208,7 +213,7 @@ presetBtns.forEach(btn => {
         stopAlarm(); // Eğer alarm çalıyorsa durdur
 
         triggerHaptic(70);
-        unlockAudio(); // Ses kilidini aç
+        unlockAudioAndNotify(); // Ses ve bildirim izni
 
         // Süreyi Ayarla
         const min = parseInt(btn.dataset.time);
