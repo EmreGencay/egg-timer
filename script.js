@@ -1,326 +1,425 @@
+// ============================================================
+// ELEMENT REFERENCES
+// ============================================================
 const timerDisplay = document.getElementById('timer');
 const pauseBtn = document.getElementById('pause-btn');
 const resetBtn = document.getElementById('reset-btn');
-// Ses dosyasını assets/alarm.ogg olarak değiştirdik
+
+// ============================================================
+// ALARM SOUND – prefer local OGG, fallback to HTML element src
+// ============================================================
 const alarmSound = new Audio('assets/alarm.ogg');
 alarmSound.id = 'alarm-sound';
-// HTML'deki audio element yerine bunu kullanacağız veya HTML'i güncelleyeceğiz ama JS'den yönetmek daha temiz.
-// Mevcut HTML'deki alarm-sound elementini de kullanabiliriz ama src değişti.
 if (document.getElementById('alarm-sound')) {
     document.getElementById('alarm-sound').src = 'assets/alarm.ogg';
 }
 
-const presetBtns = document.querySelectorAll('.preset-card');
-
-let timeLeft = 0;
-let initialTime = 0;
+// ============================================================
+// STATE
+// ============================================================
+let endTime = null;   // timestamp (ms) when the timer expires
 let intervalId = null;
 let isRunning = false;
+let isAlarmActive = false;
 let wakeLock = null;
 let vibrationInterval = null;
+let swRegistration = null;
 
-// Notification İzni (Gerekirse)
-// Butona tıklanınca istenecek
+const presetBtns = document.querySelectorAll('.preset-card');
 
-// Zamanı formatla (MM:SS)
+// ============================================================
+// SERVICE WORKER REGISTRATION
+// ============================================================
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+        swRegistration = reg;
+        console.log('SW registered:', reg.scope);
+    }).catch(err => console.warn('SW registration failed:', err));
+
+    // Listen for messages FROM the service worker (alarm trigger / stop)
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data.type === 'ALARM_TRIGGERED') {
+            // SW fired the alarm (background case)
+            if (!isAlarmActive) timerFinished();
+        }
+        if (event.data.type === 'STOP_ALARM') {
+            stopAlarm();
+        }
+    });
+}
+
+// ============================================================
+// HELPERS: TIME & DISPLAY
+// ============================================================
 function formatTime(seconds) {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    const s = Math.max(0, Math.round(seconds));
+    const m = Math.floor(s / 60);
+    return `${m.toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 }
 
-// Ekranı güncelle
 function updateDisplay() {
-    timerDisplay.textContent = formatTime(timeLeft);
-    document.title = `${formatTime(timeLeft)} - Yumurta Zamanlayıcı`;
+    const remaining = getRemainingSeconds();
+    timerDisplay.textContent = formatTime(remaining);
+    document.title = `${formatTime(remaining)} - Yumurta Zamanlayıcı`;
 }
 
-// Haptic Feedback (Titreşim) - Tek Seferlik
-function triggerHaptic(pattern) {
-    if (navigator.vibrate) {
-        navigator.vibrate(pattern);
+function getRemainingSeconds() {
+    if (!endTime) return 0;
+    return Math.max(0, (endTime - Date.now()) / 1000);
+}
+
+// ============================================================
+// PERSISTENCE – kaydet / yükle (sayfa yenilense kalsın)
+// ============================================================
+function saveState() {
+    if (endTime && isRunning) {
+        localStorage.setItem('eggTimerEndTime', endTime.toString());
+    } else {
+        localStorage.removeItem('eggTimerEndTime');
     }
 }
 
-// Sürekli Titreşim Başlat
-function startVibrationLoop() {
-    // İlk titreşim
-    if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]);
-
-    // Döngü
-    vibrationInterval = setInterval(() => {
-        if (navigator.vibrate) {
-            navigator.vibrate([500, 200, 500, 200, 500]);
+function loadState() {
+    const saved = localStorage.getItem('eggTimerEndTime');
+    if (saved) {
+        const savedEnd = parseInt(saved, 10);
+        if (savedEnd > Date.now()) {
+            // Timer was running and hasn't expired yet – restore
+            endTime = savedEnd;
+            startTimer(/* resume */ true);
+            return;
+        } else if (savedEnd <= Date.now()) {
+            // Timer expired while page was closed – fire alarm immediately
+            localStorage.removeItem('eggTimerEndTime');
+            endTime = savedEnd;
+            timerFinished();
+            return;
         }
-    }, 2500); // Titreşim süresi + boşluk kadar bekle
+    }
 }
 
-// Sürekli Titreşim Durdur
+// ============================================================
+// HAPTIC
+// ============================================================
+function triggerHaptic(pattern) {
+    if (navigator.vibrate) navigator.vibrate(pattern);
+}
+
+function startVibrationLoop() {
+    if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]);
+    vibrationInterval = setInterval(() => {
+        if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]);
+    }, 2500);
+}
+
 function stopVibrationLoop() {
     if (vibrationInterval) {
         clearInterval(vibrationInterval);
         vibrationInterval = null;
     }
-    if (navigator.vibrate) {
-        navigator.vibrate(0); // Titreşimi hemen kes
-    }
+    if (navigator.vibrate) navigator.vibrate(0);
 }
 
-// Wake Lock (Ekran Açık Tutma)
+// ============================================================
+// WAKE LOCK
+// ============================================================
 async function requestWakeLock() {
     try {
         if ('wakeLock' in navigator) {
             wakeLock = await navigator.wakeLock.request('screen');
+            console.log('Wake lock acquired');
         }
     } catch (err) {
-        console.error(`${err.name}, ${err.message}`);
+        console.warn('Wake lock error:', err.name, err.message);
     }
 }
 
 async function releaseWakeLock() {
-    if (wakeLock !== null) {
+    if (wakeLock) {
         await wakeLock.release();
         wakeLock = null;
     }
 }
 
-// Ses ve Bildirim Kilidini Aç & Media Session Hazırla
+// ============================================================
+// AUDIO UNLOCK
+// ============================================================
 function unlockAudioAndNotify() {
-    // Ses
     alarmSound.play().then(() => {
         alarmSound.pause();
         alarmSound.currentTime = 0;
-    }).catch(e => console.log("Audio unlock failed", e));
+    }).catch(e => console.log('Audio unlock failed', e));
 
-    // Bildirim İzni
-    if ("Notification" in window && Notification.permission !== "granted") {
+    if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
     }
 
-    // Media Session Hazırlığı (Arka planda çalışması için)
     if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'playing';
     }
 }
 
-// Sayacı Başlat
-function startTimer() {
-    if (timeLeft <= 0) return;
+// ============================================================
+// SERVICE WORKER: alarm scheduling
+// ============================================================
+function scheduleAlarmInSW() {
+    if (!swRegistration || !swRegistration.active) return;
+    swRegistration.active.postMessage({ type: 'START_ALARM', endTime });
+}
+
+function cancelAlarmInSW() {
+    if (!swRegistration || !swRegistration.active) return;
+    swRegistration.active.postMessage({ type: 'CANCEL_ALARM' });
+}
+
+// ============================================================
+// TIMER CORE  (Date.now-based — immune to throttling)
+// ============================================================
+function startTimer(isResume = false) {
     if (isRunning) return;
+    if (!isResume && (!endTime || endTime <= Date.now())) return;
 
     isRunning = true;
+    isAlarmActive = false;
     requestWakeLock();
 
-    // UI Güncelleme
+    // UI
     pauseBtn.style.display = 'flex';
-    pauseBtn.innerHTML = "⏸️ Duraklat";
+    pauseBtn.innerHTML = '⏸️ Duraklat';
     pauseBtn.classList.remove('primary');
     pauseBtn.classList.add('secondary');
+    document.querySelector('.timer-glow').style.animationDuration = '1s';
 
-    document.querySelector('.timer-glow').style.animationDuration = "1s";
+    // Schedule alarm in Service Worker (works even when page is throttled)
+    scheduleAlarmInSW();
 
+    // Save so we survive page refresh
+    saveState();
+
+    // Tick loop – compares against real wall clock, so throttling doesn't matter
     intervalId = setInterval(() => {
-        timeLeft--;
+        const remaining = getRemainingSeconds();
         updateDisplay();
 
-        // Media Session Güncellemesi (Kilit ekranında süre görünsün diye metadata güncellenebilir ama zorunlu değil)
-
-        if (timeLeft <= 0) {
+        if (remaining <= 0) {
             clearInterval(intervalId);
+            intervalId = null;
             timerFinished();
         }
-    }, 1000);
+    }, 500); // poll every 500ms – still works even if throttled to 1s
 }
 
-// Sayacı Duraklat
 function pauseTimer() {
+    if (!isRunning) return;
     clearInterval(intervalId);
+    intervalId = null;
     isRunning = false;
     releaseWakeLock();
+    cancelAlarmInSW();
+    localStorage.removeItem('eggTimerEndTime');
 
-    // UI Güncelleme
-    pauseBtn.innerHTML = "▶️ Devam Et";
+    // Snapshot remaining time so we can resume from here
+    const remaining = getRemainingSeconds();
+    endTime = Date.now() + remaining * 1000;
+
+    pauseBtn.innerHTML = '▶️ Devam Et';
     pauseBtn.classList.remove('secondary');
     pauseBtn.classList.add('primary');
-
-    document.querySelector('.timer-glow').style.animationDuration = "0s";
+    document.querySelector('.timer-glow').style.animationDuration = '0s';
 }
 
-// Duraklat/Devam Et Butonu
+// ============================================================
+// ALARM
+// ============================================================
+function timerFinished() {
+    isRunning = false;
+    isAlarmActive = true;
+    clearInterval(intervalId);
+    intervalId = null;
+    localStorage.removeItem('eggTimerEndTime');
+
+    pauseBtn.style.display = 'none';
+    resetBtn.style.display = 'flex';
+    resetBtn.innerHTML = '🔕 Alarmı Durdur';
+    resetBtn.classList.remove('danger');
+    resetBtn.classList.add('primary', 'pulse-active');
+
+    // Play sound (loop)
+    alarmSound.loop = true;
+    alarmSound.play().then(() => {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: 'Yumurtanız Hazır!',
+                artist: 'Afiyet Olsun 🥚',
+                artwork: [
+                    { src: 'assets/5min.png', sizes: '96x96', type: 'image/png' },
+                    { src: 'assets/5min.png', sizes: '128x128', type: 'image/png' }
+                ]
+            });
+            navigator.mediaSession.setActionHandler('stop', () => stopAlarm());
+            navigator.mediaSession.setActionHandler('pause', () => stopAlarm());
+            navigator.mediaSession.playbackState = 'playing';
+        }
+    }).catch(e => {
+        console.log('Alarm play error:', e);
+        // Couldn't auto-play → send notification as fallback
+        sendNotification('Yumurtanız Hazır! 🥚', 'Alarm çalınamadı, lütfen kontrol edin.');
+    });
+
+    startVibrationLoop();
+
+    // Visual
+    document.body.style.backgroundColor = '#FFF9C4';
+    timerDisplay.textContent = 'Hazır!';
+    timerDisplay.style.color = '#F44336';
+    document.title = '🔔 Hazır! - Yumurta Zamanlayıcı';
+
+    // System notification
+    sendNotification('Yumurtanız Hazır! 🥚', 'Afiyet olsun! Yumurtanız pişti.');
+}
+
+function stopAlarm() {
+    alarmSound.pause();
+    alarmSound.currentTime = 0;
+    alarmSound.loop = false;
+    isAlarmActive = false;
+
+    stopVibrationLoop();
+    releaseWakeLock();
+    cancelAlarmInSW();
+
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'none';
+    }
+
+    endTime = null;
+    updateDisplay();
+
+    document.body.style.backgroundColor = '';
+    timerDisplay.style.color = '';
+    document.title = 'Yumurta Zamanlayıcı';
+
+    resetBtn.innerHTML = '🔄 Sıfırla';
+    resetBtn.classList.remove('primary', 'pulse-active');
+    resetBtn.classList.add('danger');
+
+    presetBtns.forEach(b => b.classList.remove('active'));
+}
+
+// ============================================================
+// CONTROLS
+// ============================================================
 pauseBtn.addEventListener('click', () => {
     triggerHaptic(50);
     if (isRunning) {
         pauseTimer();
     } else {
+        // Resume: endTime is already set from when we paused
         startTimer();
     }
 });
 
-// Sıfırla
 resetBtn.addEventListener('click', () => {
     triggerHaptic(50);
 
-    // Eğer alarm çalıyorsa (loop veya pause değilse) veya titreşim varsa
-    if (alarmSound.loop || !alarmSound.paused || vibrationInterval) {
+    if (isAlarmActive || alarmSound.loop || !alarmSound.paused || vibrationInterval) {
         stopAlarm();
         return;
     }
 
-    // Sayaç çalışıyorsa onay iste
     if (isRunning) {
-        if (!confirm("Sayacı sıfırlamak istiyor musunuz?")) return;
+        if (!confirm('Sayacı sıfırlamak istiyor musunuz?')) return;
     }
 
-    // Her şeyi sıfırla
     clearInterval(intervalId);
+    intervalId = null;
     isRunning = false;
+    isAlarmActive = false;
+    endTime = null;
     releaseWakeLock();
     stopVibrationLoop();
+    cancelAlarmInSW();
+    localStorage.removeItem('eggTimerEndTime');
 
-    timeLeft = 0;
     updateDisplay();
 
     pauseBtn.style.display = 'none';
-    document.querySelector('.timer-glow').style.animationDuration = "0s";
+    document.querySelector('.timer-glow').style.animationDuration = '0s';
     presetBtns.forEach(b => b.classList.remove('active'));
 
-    document.title = "Yumurta Zamanlayıcı";
-    document.body.style.backgroundColor = "";
+    document.title = 'Yumurta Zamanlayıcı';
+    document.body.style.backgroundColor = '';
 });
 
-// Süre Bittiğinde
-function timerFinished() {
-    isRunning = false;
-    // Alarm çalarken ekran açık kalsın: releaseWakeLock() çağırmıyoruz.
+// ============================================================
+// PRESET SELECTION
+// ============================================================
+presetBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        clearInterval(intervalId);
+        intervalId = null;
+        isRunning = false;
 
-    pauseBtn.style.display = 'none';
+        if (isAlarmActive || alarmSound.loop || !alarmSound.paused || vibrationInterval) {
+            stopAlarm();
+        }
 
-    // Butonu "Alarmı Durdur" yap
-    resetBtn.style.display = 'flex';
-    resetBtn.innerHTML = "🔕 Alarmı Durdur";
-    resetBtn.classList.remove('danger');
-    resetBtn.classList.add('primary');
-    resetBtn.classList.add('pulse-active');
+        triggerHaptic(70);
+        unlockAudioAndNotify();
 
-    // Alarmı Çal (LOOP)
-    alarmSound.loop = true;
-    alarmSound.play()
-        .then(() => {
-            // Media Session Metadata Ayarla (Kilit Ekranı İçin)
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.metadata = new MediaMetadata({
-                    title: 'Yumurtanız Hazır!',
-                    artist: 'Afiyet Olsun 🥚',
-                    artwork: [
-                        { src: 'assets/5min.png', sizes: '96x96', type: 'image/png' },
-                        { src: 'assets/5min.png', sizes: '128x128', type: 'image/png' },
-                    ]
-                });
+        const min = parseInt(btn.dataset.time, 10);
+        endTime = Date.now() + min * 60 * 1000;
 
-                // Kilit ekranından durdurulabilsin diye handler ekle
-                navigator.mediaSession.setActionHandler('stop', function () {
-                    stopAlarm();
-                });
-                navigator.mediaSession.setActionHandler('pause', function () {
-                    stopAlarm();
-                });
-                navigator.mediaSession.playbackState = 'playing';
+        updateDisplay();
+
+        presetBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        startTimer();
+    });
+});
+
+// ============================================================
+// VISIBILITY CHANGE – re-sync when screen turns back on
+// ============================================================
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        if (isRunning) {
+            // Check if it expired while we were in background
+            if (getRemainingSeconds() <= 0) {
+                clearInterval(intervalId);
+                intervalId = null;
+                timerFinished();
+            } else {
+                // Just update the display immediately so the jump is invisible
+                updateDisplay();
             }
-        })
-        .catch(e => {
-            console.log("Alarm play error", e);
-            sendNotification("Süre Bitti!", "Alarm çalınamadı, lütfen kontrol edin.");
-        });
+        }
 
-    // Titreşim Döngüsünü Başlat
-    startVibrationLoop();
+        // Re-acquire wake lock if it was released by the OS
+        if (isRunning && !wakeLock) {
+            requestWakeLock();
+        }
+    }
+});
 
-    // Görsel Uyarı
-    document.body.style.backgroundColor = "#FFF9C4";
-    timerDisplay.textContent = "Hazır!";
-    timerDisplay.style.color = "#F44336";
-    document.title = "🔔 Hazır! - Yumurta Zamanlayıcı";
-
-    if (Notification.permission === "granted") {
-        new Notification("Yumurtanız Hazır!", {
-            body: "Afiyet olsun! 🥚",
+// ============================================================
+// NOTIFICATION HELPER
+// ============================================================
+function sendNotification(title, body) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, {
+            body,
             icon: 'assets/5min.png',
-            tag: 'egg-timer-alarm', // Yeni bildirim eskini silsin
+            tag: 'egg-timer-alarm',
             renotify: true
         });
     }
 }
 
-// Alarmı Durdur ve Normale Dön
-function stopAlarm() {
-    alarmSound.pause();
-    alarmSound.currentTime = 0;
-    alarmSound.loop = false;
-
-    stopVibrationLoop();
-    releaseWakeLock();
-
-    // Media Session Durdur
-    if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'none';
-    }
-
-    timeLeft = 0;
-    updateDisplay();
-
-    // UI Normale Dön
-    document.body.style.backgroundColor = "";
-    timerDisplay.style.color = "";
-    document.title = "Yumurta Zamanlayıcı";
-
-    resetBtn.innerHTML = "🔄 Sıfırla";
-    resetBtn.classList.remove('primary');
-    resetBtn.classList.add('danger');
-    resetBtn.classList.remove('pulse-active');
-
-    presetBtns.forEach(b => b.classList.remove('active'));
-}
-
-// Yumurta Seçimi (Preset Buttons)
-presetBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-        // Önceki işlemi temizle
-        clearInterval(intervalId);
-        isRunning = false;
-
-        // Eğer alarm çalıyorsa durdur
-        if (alarmSound.loop || !alarmSound.paused || vibrationInterval) {
-            stopAlarm();
-        }
-
-        triggerHaptic(70);
-        unlockAudioAndNotify(); // Ses ve bildirim
-
-        // Süreyi Ayarla
-        const min = parseInt(btn.dataset.time);
-        timeLeft = min * 60;
-        initialTime = timeLeft;
-        updateDisplay();
-
-        // Aktif Butonu İşaretle
-        presetBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-
-        // Otomatik Başlat
-        startTimer();
-    });
-});
-
-// Push Bildirimi Gönder (Yedek fonksiyon, gerekirse)
-function sendNotification(title, body) {
-    if (Notification.permission === "granted") {
-        new Notification(title, {
-            body: body,
-            icon: 'assets/5min.png'
-        });
-    }
-}
-
-// Başlangıç Ayarları
+// ============================================================
+// INIT
+// ============================================================
 pauseBtn.style.display = 'none';
 updateDisplay();
+loadState(); // restore timer if page was refreshed while running

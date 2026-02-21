@@ -10,6 +10,14 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#FFC107">
     <link rel="apple-touch-icon" href="assets/5min.png">
+    <script>
+        // Service Worker kaydı – arka plan alarm ve cache için
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js');
+            });
+        }
+    </script>
 </head>
 
 <body>
